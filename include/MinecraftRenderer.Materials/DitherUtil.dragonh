@@ -1,0 +1,25 @@
+#ifndef DITHER_UTIL_H_HEADER_GUARD
+#define DITHER_UTIL_H_HEADER_GUARD
+
+float calculateDitherPattern(vec2 clipPosXY, float clipPosW, vec2 ditherParamsXY, float ditherScale) {
+    vec2 ditherCoords = floor((((clipPosXY / clipPosW) * 0.5 + vec2_splat(0.5)) * ditherParamsXY) / ditherScale) * ditherScale;
+    vec2 dither4 = floor(ditherCoords * 0.25);
+    vec2 dither2 = floor(ditherCoords * 0.5);
+    vec2 dither1 = floor(ditherCoords);
+    return (((((fract(dither4.x * 0.5 + dither4.y * dither4.y * 0.75) * 0.25 +
+                fract(dither2.x * 0.5 + dither2.y * dither2.y * 0.75)) * 0.25 +
+                fract(dither1.x * 0.5 + dither1.y * dither1.y * 0.75)) * 64.0) + 0.5) * 0.015625);
+}
+
+bool evaluateDitherDiscard(vec4 clipPos, vec3 worldPos, vec3 camPos, mat4 viewMatrix, vec4 ditherParams, vec4 ditherRange) {
+    float pattern = calculateDitherPattern(clipPos.xy, clipPos.w, ditherParams.xy, ditherRange.z);
+#if BGFX_SHADER_LANGUAGE_GLSL
+    vec3 forwardDir = -normalize(vec3(viewMatrix[0].z, viewMatrix[1].z, viewMatrix[2].z));
+#else
+    vec3 forwardDir = -normalize(vec3(viewMatrix[2].x, viewMatrix[2].y, viewMatrix[2].z));
+#endif
+    float dist = dot(forwardDir, worldPos - camPos);
+    return smoothstep(ditherRange.x, ditherRange.y, dist) <= pattern;
+}
+
+#endif

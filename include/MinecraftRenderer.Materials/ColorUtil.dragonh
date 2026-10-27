@@ -1,0 +1,22 @@
+#ifndef COLOR_UTIL_H_HEADER_GUARD
+#define COLOR_UTIL_H_HEADER_GUARD
+
+vec3 fastDegamma(vec3 color) {
+    return pow(max(color, vec3_splat(0.0)), vec3_splat(2.2));
+}
+
+vec3 sRGBToLinear(vec3 color) {
+    vec3 linearLow = color * 0.0773993808;
+    vec3 linearHigh = pow((color + vec3_splat(0.055)) * 0.9478672986, vec3_splat(2.4));
+    vec3 isLow = step(color, vec3_splat(0.04045));
+    return mix(linearHigh, linearLow, isLow);
+}
+
+vec3 degammaColor(vec3 color, bool fast) {
+    if (fast) {
+        return fastDegamma(color);
+    }
+    return sRGBToLinear(color);
+}
+
+#endif

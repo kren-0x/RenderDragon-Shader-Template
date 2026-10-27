@@ -1,0 +1,28 @@
+# Build outputs
+build/
+bin/
+
+# Shader compiler binaries, downloaded base materials & archives
+tools/shaderc*
+tools/materials/
+tools/*.zip
+tools/*.tar*
+tools/.builder.pkl
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+
+# IDE / Editor artifacts
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS artifacts
+
+.DS_Store
+Thumbs.db
