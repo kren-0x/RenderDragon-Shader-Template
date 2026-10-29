@@ -11,6 +11,7 @@ import shutil
 import platform
 import zipfile
 import urllib.request
+import json
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MATERIALS_DIR = os.path.join(ROOT_DIR, "materials")
@@ -20,7 +21,9 @@ TOOLS_DIR = os.path.join(ROOT_DIR, "tools")
 BASE_MATERIALS_DIR = os.path.join(TOOLS_DIR, "materials")
 
 DEV_RELEASE_URL = "https://github.com/devendrn/newb-shader/releases/download/dev/"
-MAT_SRC_URL = DEV_RELEASE_URL + "src-materials-1.26.51.zip"
+SERIALIZED_MATERIALS_REPO = "mcpebd/serialized-materials"
+SERIALIZED_MATERIALS_RELEASES_URL = f"https://github.com/{SERIALIZED_MATERIALS_REPO}/releases"
+DEFAULT_SERIALIZED_VERSION = "v26.60"
 
 if hasattr(sys.stdout, "reconfigure"):
     try:
@@ -81,30 +84,6 @@ def get_shaderc_path():
     return os.path.join(TOOLS_DIR, name if system == "Windows" else "shaderc"), DEV_RELEASE_URL + name
 
 
-def ensure_setup():
-    shaderc_path, shaderc_url = get_shaderc_path()
-    os.makedirs(TOOLS_DIR, exist_ok=True)
-    os.makedirs(BASE_MATERIALS_DIR, exist_ok=True)
-
-    test_mat = os.path.join(BASE_MATERIALS_DIR, "Sky.material.json")
-    if not os.path.exists(shaderc_path):
-        print(f" {c_yellow('Downloading')} shaderc compiler...")
-        urllib.request.urlretrieve(shaderc_url, shaderc_path)
-        os.chmod(shaderc_path, 0o755)
-        print(f" {c_green('Downloaded')} shaderc compiler.")
-
-    if not os.path.exists(test_mat):
-        print(f" {c_yellow('Downloading')} base material templates...")
-        zip_path = os.path.join(TOOLS_DIR, "materials.zip")
-        urllib.request.urlretrieve(MAT_SRC_URL, zip_path)
-        with zipfile.ZipFile(zip_path, "r") as zf:
-            zf.extractall(BASE_MATERIALS_DIR)
-        os.remove(zip_path)
-        print(f" {c_green('Extracted')} base materials.")
-
-    return shaderc_path
-
-
 def get_available_materials():
     if not os.path.isdir(MATERIALS_DIR):
         return []
@@ -112,6 +91,149 @@ def get_available_materials():
         d for d in sorted(os.listdir(MATERIALS_DIR))
         if os.path.isdir(os.path.join(MATERIALS_DIR, d)) and not d.startswith((".", "_"))
     ]
+
+
+def get_latest_serialized_version():
+    """Detect the latest release tag from mcpebd/serialized-materials."""
+    try:
+        req = urllib.request.Request(
+            f"{SERIALIZED_MATERIALS_RELEASES_URL}/latest",
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            final_url = resp.geturl()
+            tag = final_url.rstrip("/").split("/")[-1]
+            if tag and tag != "latest":
+                return tag
+    except Exception:
+        pass
+
+    try:
+        req = urllib.request.Request(
+            f"https://api.github.com/repos/{SERIALIZED_MATERIALS_REPO}/releases/latest",
+            headers={"User-Agent": "Mozilla/5.0", "Accept": "application/vnd.github.v3+json"}
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            tag = data.get("tag_name")
+            if tag:
+                return tag
+    except Exception:
+        pass
+
+    return DEFAULT_SERIALIZED_VERSION
+
+
+def normalize_version_tag(version):
+    if not version or version.lower() == "latest":
+        return get_latest_serialized_version()
+    v = version.strip()
+    if not v.startswith("v") and v[0].isdigit():
+        return f"v{v}"
+    return v
+
+
+def get_current_installed_version():
+    ver_file = os.path.join(BASE_MATERIALS_DIR, ".version")
+    if os.path.exists(ver_file):
+        try:
+            with open(ver_file, "r", encoding="utf-8") as f:
+                return f.read().strip()
+        except Exception:
+            pass
+    return None
+
+
+def are_base_materials_present():
+    if not os.path.isdir(BASE_MATERIALS_DIR):
+        return False
+    required = [f"{m}.material.json" for m in get_available_materials()]
+    if not required:
+        return os.path.exists(os.path.join(BASE_MATERIALS_DIR, "Sky.material.json"))
+    return all(os.path.exists(os.path.join(BASE_MATERIALS_DIR, r)) for r in required)
+
+
+def setup_materials(version=None, force=False):
+    tag = normalize_version_tag(version)
+    os.makedirs(BASE_MATERIALS_DIR, exist_ok=True)
+
+    current_ver = get_current_installed_version()
+    if not force and are_base_materials_present() and (current_ver == tag or version is None):
+        return True
+
+    zip_url = f"https://github.com/{SERIALIZED_MATERIALS_REPO}/archive/refs/tags/{tag}.zip"
+    zip_path = os.path.join(TOOLS_DIR, f"serialized-{tag}.zip")
+
+    print(f" {c_yellow('Downloading')} serialized materials {c_cyan(tag)} from {SERIALIZED_MATERIALS_REPO}...")
+
+    try:
+        req = urllib.request.Request(zip_url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=30) as resp, open(zip_path, "wb") as out_f:
+            shutil.copyfileobj(resp, out_f)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            print(f" {c_red('Error:')} Version '{tag}' not found on {SERIALIZED_MATERIALS_RELEASES_URL}")
+            print(f" Available releases: {SERIALIZED_MATERIALS_RELEASES_URL}")
+        else:
+            print(f" {c_red('Download failed:')} HTTP {e.code} {e.reason}")
+        if os.path.exists(zip_path):
+            os.remove(zip_path)
+        return False
+    except Exception as e:
+        print(f" {c_red('Download failed:')} {e}")
+        if os.path.exists(zip_path):
+            os.remove(zip_path)
+        return False
+
+    try:
+        needed_mats = {f"{m.lower()}.material.json": m for m in get_available_materials()}
+        extracted = 0
+
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            for member in zf.infolist():
+                if member.is_dir():
+                    continue
+                filename = os.path.basename(member.filename)
+                low_name = filename.lower()
+                if low_name in needed_mats:
+                    canonical_name = f"{needed_mats[low_name]}.material.json"
+                    dest_file = os.path.join(BASE_MATERIALS_DIR, canonical_name)
+                    with zf.open(member) as src_f, open(dest_file, "wb") as dst_f:
+                        dst_f.write(src_f.read())
+                    extracted += 1
+
+        ver_file = os.path.join(BASE_MATERIALS_DIR, ".version")
+        with open(ver_file, "w", encoding="utf-8") as f:
+            f.write(tag)
+
+        print(f" {c_green('Extracted')} {extracted} base materials ({tag}) into {c_bold('tools/materials')}")
+        return True
+    except Exception as e:
+        print(f" {c_red('Extraction failed:')} {e}")
+        return False
+    finally:
+        if os.path.exists(zip_path):
+            try:
+                os.remove(zip_path)
+            except Exception:
+                pass
+
+
+def ensure_setup(version=None, force=False):
+    shaderc_path, shaderc_url = get_shaderc_path()
+    os.makedirs(TOOLS_DIR, exist_ok=True)
+    os.makedirs(BASE_MATERIALS_DIR, exist_ok=True)
+
+    if not os.path.exists(shaderc_path):
+        print(f" {c_yellow('Downloading')} shaderc compiler...")
+        urllib.request.urlretrieve(shaderc_url, shaderc_path)
+        os.chmod(shaderc_path, 0o755)
+        print(f" {c_green('Downloaded')} shaderc compiler.")
+
+    if force or not are_base_materials_present():
+        setup_materials(version=version, force=force)
+
+    return shaderc_path
 
 
 def build_materials(target_platform="windows", material_name=None):
@@ -176,8 +298,8 @@ def print_help():
   build.bat [platform]           Build all materials for target platform
   build.bat [material]           Build single material for {default_plat}
   build.bat [material] [plat]    Build single material for target platform
+  build.bat setup [version]      Download base materials (default: latest release)
   build.bat clean                Delete build/ artifacts
-  build.bat setup                Check and download compiler if missing
 
 {c_bold("Platforms:")}
   windows, android, ios, multiplatform
@@ -188,6 +310,8 @@ def print_help():
   build.bat android
   build.bat RenderChunk
   build.bat RenderChunk android
+  build.bat setup
+  build.bat setup v26.50
   build.bat clean
 """)
 
@@ -236,7 +360,18 @@ def run_interactive():
             clean_build()
             continue
         if choice in ("s", "setup"):
-            ensure_setup()
+            current = get_current_installed_version() or "none"
+            latest = get_latest_serialized_version()
+            print()
+            print(f"  {c_bold('Base Materials Setup')} ({SERIALIZED_MATERIALS_REPO})")
+            print(f"  Current installed: {c_cyan(current)} | Latest available: {c_green(latest)}")
+            try:
+                ver_input = input(f"  {c_bold('Enter version')} [{latest}]: ").strip()
+            except (KeyboardInterrupt, EOFError):
+                print()
+                continue
+            target_ver = ver_input if ver_input else latest
+            ensure_setup(version=target_ver, force=True)
             continue
 
         plat_map = {
@@ -290,7 +425,8 @@ def parse_and_run(args):
         clean_build()
         return
     if first in ("s", "setup", "--setup", "init"):
-        ensure_setup()
+        ver = args[1] if len(args) > 1 else None
+        ensure_setup(version=ver, force=True)
         return
     if first in ("-i", "--interactive", "menu"):
         run_interactive()

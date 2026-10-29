@@ -39,6 +39,8 @@ Requirements: Python 3.9+ with pip added to PATH.
    build.bat android
    build.bat RenderChunk
    build.bat RenderChunk android
+   build.bat setup
+   build.bat setup v26.50
    build.bat clean
    ```
 
@@ -69,10 +71,17 @@ Compiled `.material.bin` files are placed in `build/<platform>/`.
    ```bash
    ./build.sh android
    ./build.sh RenderChunk
+   ./build.sh setup
    ./build.sh clean
    ```
 
-`shaderc` and base material definitions download automatically on the first build.
+`shaderc` and base material definitions download automatically on the first build (synced with the latest release from [mcpebd/serialized-materials](https://github.com/mcpebd/serialized-materials)).
+
+## Credits
+
+- [RenderDragonSourceCodeInv](https://github.com/SurvivalApparatusCommunication/RenderDragonSourceCodeInv) - Primary source code and shader base reference
+- [mcbe-shader-codebase](https://github.com/veka0/mcbe-shader-codebase) - Reference for deobfuscated shader code
+- [serialized-materials](https://github.com/mcpebd/serialized-materials) - Base material JSON definitions
 
 ## License
 
