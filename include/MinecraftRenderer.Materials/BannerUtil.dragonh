@@ -1,0 +1,27 @@
+#ifndef BANNER_UTIL_H_HEADER_GUARD
+#define BANNER_UTIL_H_HEADER_GUARD
+
+vec4 calculateBannerUVs(vec2 uv, vec4 bannerScaleOffset, vec4 baseScaleOffset) {
+    return vec4(
+        (uv * bannerScaleOffset.zw) + bannerScaleOffset.xy,
+        (uv * baseScaleOffset.zw) + baseScaleOffset.xy
+    );
+}
+
+vec4 getBannerColor(int frameIndex, vec4 bannerColor, vec4 vertexColor) {
+#if defined(TINTING)
+    vec4 color = bannerColor;
+    color.a = frameIndex > 0 ? 0.0 : 1.0;
+    return color;
+#else
+    return vertexColor;
+#endif
+}
+
+vec4 applyBannerTint(vec4 baseTex, vec4 patternTex, vec4 color) {
+    baseTex.a = mix(patternTex.r * patternTex.a, patternTex.a, color.a);
+    baseTex.rgb *= color.rgb;
+    return baseTex;
+}
+
+#endif

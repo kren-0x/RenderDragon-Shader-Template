@@ -1,0 +1,21 @@
+{
+  "macro_overwrite": {
+    "flags": {
+      "Instancing": {
+        "On": "INSTANCING",
+        "Off": []
+      }
+    },
+    "passes": {
+      "AlphaTest": "ALPHA_TEST",
+      "Transparent": "TRANSPARENT"
+    }
+  },
+  "file_overwrite": {
+    "default": {
+      "fragment": "fragment.sc",
+      "vertex": "vertex.sc",
+      "varying": "varying.def.sc"
+    }
+  }
+}

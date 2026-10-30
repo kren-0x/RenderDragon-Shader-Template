@@ -1,0 +1,39 @@
+{
+  "macro_overwrite": {
+    "flags": {
+      "AlphaTest": {
+        "On_DiscardValueBased": "ALPHA_TEST_DISCARD_VALUE",
+        "On_VertexTintMaskBased": "ALPHA_TEST_TINT_MASK",
+        "Off": []
+      },
+      "Lit": {
+        "On": "LIT",
+        "Off": []
+      },
+      "MultiColorTint": {
+        "On": "MULTI_COLOR_TINT",
+        "Off": []
+      },
+      "UseTextures": {
+        "On": "USE_TEXTURES",
+        "Off": []
+      }
+    },
+    "passes": {
+      "AlphaTest": "ALPHA_TEST",
+      "DepthOnlyAlphaTest": "DEPTH_ONLY_ALPHA_TEST",
+      "Opaque": "OPAQUE",
+      "RasterizedAlphaTest": "RASTERIZED_ALPHA_TEST",
+      "RasterizedOpaque": "RASTERIZED_OPAQUE",
+      "RasterizedTransparent": "RASTERIZED_TRANSPARENT",
+      "Transparent": "TRANSPARENT"
+    }
+  },
+  "file_overwrite": {
+    "default": {
+      "fragment": "fragment.sc",
+      "vertex": "vertex.sc",
+      "varying": "varying.def.sc"
+    }
+  }
+}

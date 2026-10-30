@@ -1,0 +1,15 @@
+#ifndef PATTERN_UTIL_H_HEADER_GUARD
+#define PATTERN_UTIL_H_HEADER_GUARD
+
+vec4 applyActorPatterns(vec4 albedo, vec2 uv, sampler2D patternTexture, float count, vec4 colors[7], vec4 uvOffsetsAndScales[7]) {
+    int n = int(count);
+    for (int i = 0; i < n; i++) {
+        vec2 patternUv = (uv * uvOffsetsAndScales[i].zw) + uvOffsetsAndScales[i].xy;
+        vec4 patternColor = texture2D(patternTexture, patternUv) * colors[i];
+        albedo = mix(albedo, patternColor, patternColor.a);
+    }
+    albedo.a = 1.0;
+    return albedo;
+}
+
+#endif

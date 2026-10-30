@@ -1,0 +1,12 @@
+#ifndef MESH_FALLBACK_UTIL_H_HEADER_GUARD
+#define MESH_FALLBACK_UTIL_H_HEADER_GUARD
+
+#include "DynamicUtil.dragonh"
+
+vec4 applyMeshMultiColorChange(vec4 diffuse, vec4 vertexColor, vec3 changeColor) {
+    vec2 colorMask = diffuse.rg;
+    diffuse.rgb = mix(diffuse.r * vertexColor.rgb, diffuse.g * changeColor, ceil(colorMask.g));
+    return diffuse;
+}
+
+#endif

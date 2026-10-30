@@ -77,11 +77,19 @@ Compiled `.material.bin` files are placed in `build/<platform>/`.
 
 `shaderc` and base material definitions download automatically on the first build (synced with the latest release from [mcpebd/serialized-materials](https://github.com/mcpebd/serialized-materials)).
 
+### Adding new materials
+
+The build script automatically detects materials in the `materials/` directory. If you add your own material:
+
+1. Create a folder for it in `materials/` with your shader source files (`vertex.sc`, `fragment.sc`, `varying.def.sc`, `config.json`).
+2. Add the material folder name to `include_patterns` in `materials/project.json`.
+3. Run `build.bat setup` (or `./build.sh setup`) to fetch and extract its base `.material.json` definition from the serialized materials repository.
+
 ## Credits
 
-- [RenderDragonSourceCodeInv](https://github.com/SurvivalApparatusCommunication/RenderDragonSourceCodeInv) - Primary source code and shader base reference
-- [mcbe-shader-codebase](https://github.com/veka0/mcbe-shader-codebase) - Reference for deobfuscated shader code
-- [serialized-materials](https://github.com/mcpebd/serialized-materials) - Base material JSON definitions
+- [RenderDragonSourceCodeInv](https://github.com/SurvivalApparatusCommunication/RenderDragonSourceCodeInv) - Reference for deobfuscated, readable shader source code
+- [mcbe-shader-codebase](https://github.com/veka0/mcbe-shader-codebase) - Reference for latest vanilla obfuscated shader code
+- [serialized-materials](https://github.com/mcpebd/serialized-materials) - Serialized material JSON definitions
 
 ## License
 
