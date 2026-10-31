@@ -1,0 +1,10 @@
+#ifndef CUBEMAP_UTIL_H_HEADER_GUARD
+#define CUBEMAP_UTIL_H_HEADER_GUARD
+
+vec3 getCubemapDirection(vec3 texcoord) {
+    vec3 dir = normalize(texcoord);
+    dir.x = -dir.x;
+    return dir;
+}
+
+#endif

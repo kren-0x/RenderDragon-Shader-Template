@@ -1,0 +1,18 @@
+#ifndef UI_UTIL_H_HEADER_GUARD
+#define UI_UTIL_H_HEADER_GUARD
+
+vec4 applyHudOpacity(vec4 diffuse, const float hudOpacity) {
+    diffuse.a *= hudOpacity;
+    return diffuse;
+}
+
+vec4 applyHudOpacity(vec4 diffuse, const vec4 hudOpacity) {
+    diffuse.a *= hudOpacity.x;
+    return diffuse;
+}
+
+float median(float a, float b, float c) {
+    return max(min(a, b), min(max(a, b), c));
+}
+
+#endif

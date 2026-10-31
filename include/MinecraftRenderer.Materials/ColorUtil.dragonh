@@ -5,6 +5,10 @@ vec3 fastDegamma(vec3 color) {
     return pow(max(color, vec3_splat(0.0)), vec3_splat(2.2));
 }
 
+vec4 fastDegamma(vec4 color) {
+    return vec4(fastDegamma(color.rgb), color.a);
+}
+
 vec3 sRGBToLinear(vec3 color) {
     vec3 linearLow = color * 0.0773993808;
     vec3 linearHigh = pow((color + vec3_splat(0.055)) * 0.9478672986, vec3_splat(2.4));
@@ -12,11 +16,19 @@ vec3 sRGBToLinear(vec3 color) {
     return mix(linearHigh, linearLow, isLow);
 }
 
+vec4 sRGBToLinear(vec4 color) {
+    return vec4(sRGBToLinear(color.rgb), color.a);
+}
+
 vec3 degammaColor(vec3 color, bool fast) {
     if (fast) {
         return fastDegamma(color);
     }
     return sRGBToLinear(color);
+}
+
+vec4 degammaColor(vec4 color, bool fast) {
+    return vec4(degammaColor(color.rgb, fast), color.a);
 }
 
 #endif

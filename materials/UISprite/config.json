@@ -1,0 +1,22 @@
+{
+  "file_overwrite": {
+    "default": {
+      "vertex": "vertex.sc",
+      "fragment": "fragment.sc",
+      "varying": "varying.def.sc"
+    }
+  },
+  "macro_overwrite": {
+    "flags": {
+      "MultiColorTint": {
+        "On": ["MULTI_COLOR_TINT"],
+        "Off": []
+      }
+    },
+    "passes": {
+      "AlphaTest": "ALPHA_TEST",
+      "Blend": "BLEND",
+      "Transparent": "TRANSPARENT"
+    }
+  }
+}

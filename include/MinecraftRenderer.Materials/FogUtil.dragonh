@@ -16,4 +16,14 @@ vec3 applyFog(vec3 diffuse, vec3 fogColor, float fogIntensity) {
     return mix(diffuse, fogColor, fogIntensity);
 }
 
+vec4 applyFog(vec4 diffuse, vec4 fog) {
+    diffuse.rgb = applyFog(diffuse.rgb, fog.rgb, fog.a);
+    return diffuse;
+}
+
+vec4 calculateFog(vec4 fogColor, float cameraDepth, vec4 fogControl) {
+    float intensity = calculateFogIntensity(cameraDepth, fogControl.z, fogControl.x, fogControl.y);
+    return vec4(fogColor.rgb, intensity);
+}
+
 #endif

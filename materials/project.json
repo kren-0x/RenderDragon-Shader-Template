@@ -1,7 +1,11 @@
 {
   "base_profile": {
-    "platforms": ["ESSL_310"],
-    "merge_source": ["../tools/materials"],
+    "platforms": [
+      "ESSL_310"
+    ],
+    "merge_source": [
+      "../tools/materials"
+    ],
     "include_patterns": [
       "Actor",
       "ActorBanner",
@@ -11,38 +15,75 @@
       "ActorPattern",
       "ActorPatternGlint",
       "ActorTint",
+      "BeaconBeam",
+      "BlockOutlineSelection",
+      "BlockSelectionOutline",
+      "BlockSelectionOverlay",
+      "BlockSelectionOverlayBlockEntity",
       "Clouds",
+      "Cracks",
+      "CracksBlockEntity",
+      "Cubemap",
+      "CubemapHDRi",
+      "EndPortal",
       "EndSky",
+      "FlameBillboard",
+      "Flipbook",
       "ItemInHandColor",
       "ItemInHandColorGlint",
       "ItemInHandTextured",
+      "LegacyCubemap",
       "MeshFallbackPosUVNormalColor",
+      "Nametag",
       "Particle",
       "RenderChunk",
+      "ScreenBlit",
+      "SingleBlock",
       "Sky",
       "Stars",
       "SunMoon",
+      "UIBase",
+      "UIBlit",
+      "UIFill",
+      "UIGlint",
+      "UISprite",
+      "UIText",
       "Weather"
     ],
-    "exclude_patterns": [".*", "_*"],
-    "include_search_paths": ["../include"]
+    "exclude_patterns": [
+      ".*",
+      "_*"
+    ],
+    "include_search_paths": [
+      "../include"
+    ]
   },
   "profiles": {
     "android": {
       "macros": [],
-      "platforms": ["ESSL_310"]
+      "platforms": [
+        "ESSL_310"
+      ]
     },
     "ios": {
       "macros": [],
-      "platforms": ["Metal"]
+      "platforms": [
+        "Metal"
+      ]
     },
     "windows": {
       "macros": [],
-      "platforms": ["Direct3D_SM50"]
+      "platforms": [
+        "Direct3D_SM50"
+      ]
     },
     "multiplatform": {
       "macros": [],
-      "platforms": ["ESSL_310", "Direct3D_SM50", "Metal"]
+      "platforms": [
+        "ESSL_310",
+        "Direct3D_SM50",
+        "Metal"
+      ]
     }
   }
 }

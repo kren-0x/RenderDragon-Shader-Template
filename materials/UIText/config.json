@@ -1,0 +1,26 @@
+{
+  "file_overwrite": {
+    "default": {
+      "vertex": "vertex.sc",
+      "fragment": "fragment.sc",
+      "varying": "varying.def.sc"
+    }
+  },
+  "macro_overwrite": {
+    "flags": {
+      "ALPHA_TEST": {
+        "On": ["ALPHA_TEST"],
+        "Off": []
+      },
+      "FONT_TYPE": {
+        "Bitmap": ["FONT_TYPE_BITMAP"],
+        "BitmapSmooth": ["FONT_TYPE_BITMAP_SMOOTH"],
+        "TrueType": ["FONT_TYPE_TRUE_TYPE"],
+        "MSDF": ["FONT_TYPE_MSDF"]
+      }
+    },
+    "passes": {
+      "Transparent": []
+    }
+  }
+}

@@ -1,0 +1,9 @@
+#ifndef SELECTION_UTIL_H_HEADER_GUARD
+#define SELECTION_UTIL_H_HEADER_GUARD
+
+vec4 applySelectionDepthBias(vec4 position) {
+    position.z -= 0.0001220703125;
+    return position;
+}
+
+#endif

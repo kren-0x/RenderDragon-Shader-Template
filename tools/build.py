@@ -186,7 +186,6 @@ def setup_materials(version=None, force=False):
         return False
 
     try:
-        needed_mats = {f"{m.lower()}.material.json": m for m in get_available_materials()}
         extracted = 0
 
         with zipfile.ZipFile(zip_path, "r") as zf:
@@ -194,10 +193,8 @@ def setup_materials(version=None, force=False):
                 if member.is_dir():
                     continue
                 filename = os.path.basename(member.filename)
-                low_name = filename.lower()
-                if low_name in needed_mats:
-                    canonical_name = f"{needed_mats[low_name]}.material.json"
-                    dest_file = os.path.join(BASE_MATERIALS_DIR, canonical_name)
+                if filename.endswith(".material.json"):
+                    dest_file = os.path.join(BASE_MATERIALS_DIR, filename)
                     with zf.open(member) as src_f, open(dest_file, "wb") as dst_f:
                         dst_f.write(src_f.read())
                     extracted += 1

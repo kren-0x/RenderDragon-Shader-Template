@@ -1,0 +1,17 @@
+{
+  "macro_overwrite": {
+    "flags": {},
+    "passes": {
+      "ForceForwardPBROpaque": "FORCE_FORWARD_PBR_OPAQUE",
+      "Transparent": "TRANSPARENT",
+      "TransparentDegamma": "TRANSPARENT_DEGAMMA"
+    }
+  },
+  "file_overwrite": {
+    "default": {
+      "fragment": "fragment.sc",
+      "vertex": "vertex.sc",
+      "varying": "varying.def.sc"
+    }
+  }
+}

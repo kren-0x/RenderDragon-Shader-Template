@@ -1,0 +1,15 @@
+{
+  "file_overwrite": {
+    "default": {
+      "vertex": "vertex.sc",
+      "fragment": "fragment.sc",
+      "varying": "varying.def.sc"
+    }
+  },
+  "macro_overwrite": {
+    "passes": {
+      "Blit": [],
+      "BlitUncompressed": []
+    }
+  }
+}

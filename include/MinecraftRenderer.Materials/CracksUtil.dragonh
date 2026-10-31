@@ -1,0 +1,8 @@
+#ifndef CRACKS_UTIL_H_HEADER_GUARD
+#define CRACKS_UTIL_H_HEADER_GUARD
+
+bool shouldDiscardCrack(float alpha) {
+    return alpha < 0.5;
+}
+
+#endif

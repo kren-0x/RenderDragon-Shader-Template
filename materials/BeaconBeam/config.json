@@ -1,0 +1,21 @@
+{
+  "macro_overwrite": {
+    "flags": {
+      "Fancy": {
+        "On": "FANCY",
+        "Off": []
+      }
+    },
+    "passes": {
+      "Opaque": "OPAQUE",
+      "Transparent": "TRANSPARENT"
+    }
+  },
+  "file_overwrite": {
+    "default": {
+      "fragment": "fragment.sc",
+      "vertex": "vertex.sc",
+      "varying": "varying.def.sc"
+    }
+  }
+}
