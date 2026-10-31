@@ -1,0 +1,30 @@
+{
+  "file_overwrite": {
+    "default": {
+      "vertex": "vertex.sc",
+      "fragment": "fragment.sc",
+      "varying": "varying.def.sc"
+    }
+  },
+  "macro_overwrite": {
+    "flags": {
+      "AlphaTest": {
+        "On_DiscardValueBased": ["ALPHA_TEST_DISCARD_VALUE_BASED"],
+        "On_VertexTintMaskBased": ["ALPHA_TEST_VERTEX_TINT_MASK_BASED"],
+        "Off": []
+      },
+      "UseTextures": {
+        "On": ["USE_TEXTURES"],
+        "Off": []
+      },
+      "Lit": {
+        "Off": []
+      }
+    },
+    "passes": {
+      "FullScreenOverlayTransparent": [],
+      "Opaque": [],
+      "Transparent": []
+    }
+  }
+}

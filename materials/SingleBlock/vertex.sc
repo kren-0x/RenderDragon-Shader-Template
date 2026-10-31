@@ -20,10 +20,7 @@ void main() {
     proj[2].y -= SubPixelOffset.y;
     vec4 clipPos = mul(proj, mul(u_view, vec4(worldPos.xyz, 1.0)));
     vec4 pos = clipPos;
-    uvec2 unormUV = uvec2(round(a_texcoord0 * 65535.0));
-    vec2 uv = vec2(float((unormUV.x & 32767u) << uint(1)), float((unormUV.y & 32767u) << uint(1))) * 1.525902189314365386962890625e-05;
-    uv.x += 3.0517578125e-05 * ((2.0 * float((unormUV.x & 32768u) >> uint(15))) - 1.0);
-    uv.y += 3.0517578125e-05 * ((2.0 * float((unormUV.y & 32768u) >> uint(15))) - 1.0);
+    vec2 uv = unpackTextureCoords(a_texcoord0);
     pos.z += ZShiftValue.x;
 
 #if LIT
@@ -39,7 +36,7 @@ void main() {
     v_clipPosition = clipPos;
     v_color = a_color0;
     v_fog = calculateFog(FogColor, pos.z, FogControl);
-    v_texCoords = UVAnimation.xy + (uv * UVAnimation.zw);
+    v_texCoords = applyUvAnimation(uv, UVAnimation);
     v_worldPos = worldPos.xyz;
     gl_Position = pos;
 }

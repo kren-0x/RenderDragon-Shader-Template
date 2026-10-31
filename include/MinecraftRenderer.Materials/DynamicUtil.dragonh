@@ -1,6 +1,14 @@
 #ifndef DYNAMIC_UTIL_H_HEADER_GUARD
 #define DYNAMIC_UTIL_H_HEADER_GUARD
 
+vec2 unpackTextureCoords(vec2 packedCoords) {
+    uvec2 unormUV = uvec2(round(packedCoords * 65535.0));
+    vec2 uv = vec2(float((unormUV.x & 32767u) << uint(1)), float((unormUV.y & 32767u) << uint(1))) * 1.525902189314365386962890625e-05;
+    uv.x += 3.0517578125e-05 * ((2.0 * float((unormUV.x & 32768u) >> uint(15))) - 1.0);
+    uv.y += 3.0517578125e-05 * ((2.0 * float((unormUV.y & 32768u) >> uint(15))) - 1.0);
+    return uv;
+}
+
 vec2 applyUvAnimation(vec2 uv, const vec4 uvAnimation) {
     uv = uvAnimation.xy + (uv * uvAnimation.zw);
     return uv;
