@@ -5,6 +5,7 @@ bin/
 # Shader compiler binaries, downloaded base materials & archives
 tools/shaderc*
 tools/materials/
+tools/lib/
 tools/*.zip
 tools/*.tar*
 tools/.builder.pkl

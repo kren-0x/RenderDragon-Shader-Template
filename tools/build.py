@@ -18,6 +18,7 @@ MATERIALS_DIR = os.path.join(ROOT_DIR, "materials")
 INCLUDE_DIR = os.path.join(ROOT_DIR, "include")
 BUILD_DIR = os.path.join(ROOT_DIR, "build")
 TOOLS_DIR = os.path.join(ROOT_DIR, "tools")
+LIB_DIR = os.path.join(TOOLS_DIR, "lib")
 BASE_MATERIALS_DIR = os.path.join(TOOLS_DIR, "materials")
 
 DEV_RELEASE_URL = "https://github.com/devendrn/newb-shader/releases/download/dev/"
@@ -216,7 +217,43 @@ def setup_materials(version=None, force=False):
                 pass
 
 
+def check_and_apply_termux_fix():
+    os.makedirs(LIB_DIR, exist_ok=True)
+    dest_so = os.path.join(LIB_DIR, "libc++_shared.so")
+
+    termux_prefix = os.environ.get("PREFIX", "/data/data/com.termux/files/usr")
+    termux_usr_lib = os.path.join(termux_prefix, "lib")
+    local_lib = os.path.expanduser("~/.local/lib")
+
+    if not os.path.exists(dest_so):
+        candidates = [
+            os.path.join(termux_usr_lib, "libc++_shared.so"),
+            "/data/data/com.termux/files/usr/lib/libc++_shared.so",
+            os.path.join(local_lib, "libc++_shared.so"),
+        ]
+        for src in candidates:
+            if os.path.exists(src):
+                try:
+                    shutil.copyfile(src, dest_so)
+                    print(f" {c_green('Applied')} Termux fix: copied libc++_shared.so to {c_bold('tools/lib')}")
+                    break
+                except Exception:
+                    pass
+
+    ld_paths = [LIB_DIR]
+    if os.path.isdir(local_lib):
+        ld_paths.append(local_lib)
+
+    current_ld = os.environ.get("LD_LIBRARY_PATH", "")
+    if current_ld:
+        for p in current_ld.split(":"):
+            if p and p not in ld_paths and not p.startswith(termux_usr_lib) and not p.startswith("/data/data/com.termux/files/usr/lib"):
+                ld_paths.append(p)
+    os.environ["LD_LIBRARY_PATH"] = ":".join(ld_paths)
+
+
 def ensure_setup(version=None, force=False):
+    check_and_apply_termux_fix()
     shaderc_path, shaderc_url = get_shaderc_path()
     os.makedirs(TOOLS_DIR, exist_ok=True)
     os.makedirs(BASE_MATERIALS_DIR, exist_ok=True)
@@ -235,6 +272,7 @@ def ensure_setup(version=None, force=False):
 
 def build_materials(target_platform="windows", material_name=None):
     t0 = time.time()
+    check_and_apply_termux_fix()
     shaderc_path = ensure_setup()
 
     out_dir = os.path.join(BUILD_DIR, target_platform)
@@ -273,7 +311,11 @@ def build_materials(target_platform="windows", material_name=None):
         print(f"\n {c_green('✓ Done')} in {elapsed:.1f}s -> {c_bold(rel_out)}")
         return True
     except Exception as e:
-        print(f"\n {c_red('✗ Build failed:')} {e}")
+        err_msg = str(e)
+        print(f"\n {c_red('✗ Build failed:')} {err_msg}")
+        if "libc++_shared.so" in err_msg or "CANNOT LINK EXECUTABLE" in err_msg:
+            print(f"\n {c_yellow('Hint:')} Termux requires libc++_shared.so for shaderc.")
+            print(f" Run: {c_cyan('pkg install libc++')} in Termux.")
         return False
 
 
