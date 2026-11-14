@@ -23,7 +23,7 @@ SAMPLER2D_AUTOREG(s_MatTexture);
 SAMPLER2D_AUTOREG(s_MatTexture1);
 
 void main() {
-#if defined(DEPTH_ONLY) || defined(DEPTH_ONLY_OPAQUE)
+#if defined(DEPTH_ONLY) || defined(DEPTH_ONLY_OPAQUE) || defined(DEPTH_ONLY_ALPHA_TEST)
     gl_FragColor = vec4_splat(0.0);
     return;
 #else

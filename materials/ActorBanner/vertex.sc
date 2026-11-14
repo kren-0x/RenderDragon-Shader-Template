@@ -44,7 +44,7 @@ void main() {
     float fogIntensity = calculateFogIntensity(cameraDepth, FogControl.z, FogControl.x, FogControl.y);
     vec4 fog = vec4(FogColor.rgb, fogIntensity);
 
-    int frameIndex = int(a_color0.w * 255.0);
+    int frameIndex = clamp(int(a_color0.w * 255.0), 0, 6);
     vec4 texcoords = calculateBannerUVs(texcoord0, BannerUVOffsetsAndScales[frameIndex], BannerUVOffsetsAndScales[0]);
     vec4 color = getBannerColor(frameIndex, BannerColors[frameIndex], a_color0);
 

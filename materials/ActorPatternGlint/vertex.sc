@@ -3,7 +3,7 @@ $input a_position, a_color0, a_texcoord0, a_indices, a_normal
     $input i_data1, i_data2, i_data3
 #endif
 
-$output v_clipPosition, v_color0, v_fog, v_layerUv, v_light, v_texcoord0, v_worldPos
+$output v_clipPosition, v_color0, v_fog, v_layerUv, v_light, v_texcoord0, v_texcoords, v_worldPos
 
 #include <bgfx_shader.sh>
 #include <MinecraftRenderer.Materials/DynamicUtil.dragonh>
@@ -60,6 +60,7 @@ void main() {
     v_layerUv = layerUV;
     v_fog = fog;
     v_light = light;
+    v_texcoords = vec4_splat(0.0);
     v_worldPos = worldPosition;
     gl_Position = position;
 }

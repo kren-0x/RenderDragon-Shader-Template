@@ -220,6 +220,7 @@ def setup_materials(version=None, force=False):
 def check_and_apply_termux_fix():
     os.makedirs(LIB_DIR, exist_ok=True)
     dest_so = os.path.join(LIB_DIR, "libc++_shared.so")
+    dest_lzma = os.path.join(LIB_DIR, "liblzma.so")
 
     termux_prefix = os.environ.get("PREFIX", "/data/data/com.termux/files/usr")
     termux_usr_lib = os.path.join(termux_prefix, "lib")
@@ -240,9 +241,41 @@ def check_and_apply_termux_fix():
                 except Exception:
                     pass
 
-    ld_paths = [LIB_DIR]
-    if os.path.isdir(local_lib):
-        ld_paths.append(local_lib)
+    system_lzma_candidates = [
+        "/apex/com.android.runtime/lib64/bionic/liblzma.so",
+        "/apex/com.android.art/lib64/liblzma.so",
+        "/system/lib64/liblzma.so",
+        "/apex/com.android.runtime/lib/bionic/liblzma.so",
+        "/apex/com.android.art/lib/liblzma.so",
+        "/system/lib/liblzma.so",
+    ]
+    detected_system_lzma = None
+    for src in system_lzma_candidates:
+        if os.path.exists(src):
+            detected_system_lzma = src
+            if not os.path.exists(dest_lzma):
+                try:
+                    shutil.copyfile(src, dest_lzma)
+                    print(f" {c_green('Applied')} Termux fix: copied liblzma.so to {c_bold('tools/lib')}")
+                except Exception:
+                    pass
+            break
+
+    if detected_system_lzma:
+        curr_preload = os.environ.get("LD_PRELOAD", "")
+        if detected_system_lzma not in curr_preload:
+            os.environ["LD_PRELOAD"] = f"{detected_system_lzma}:{curr_preload}".strip(":")
+
+    system_paths = [
+        LIB_DIR,
+        local_lib,
+        "/apex/com.android.runtime/lib64/bionic",
+        "/apex/com.android.art/lib64",
+        "/system/lib64",
+        "/apex/com.android.runtime/lib/bionic",
+        "/system/lib",
+    ]
+    ld_paths = [p for p in system_paths if os.path.isdir(p) or p == LIB_DIR]
 
     current_ld = os.environ.get("LD_LIBRARY_PATH", "")
     if current_ld:
@@ -275,11 +308,27 @@ def build_materials(target_platform="windows", material_name=None):
     check_and_apply_termux_fix()
     shaderc_path = ensure_setup()
 
+    import subprocess
+    try:
+        test_run = subprocess.run([shaderc_path, "-v"], capture_output=True)
+        if test_run.returncode != 0:
+            err_msg = test_run.stderr.decode("utf-8", errors="replace") or test_run.stdout.decode("utf-8", errors="replace")
+            print(f"\n {c_red('✗ Compiler error:')} {err_msg.strip()}")
+            if "Xzs_Construct" in err_msg or "libunwindstack" in err_msg:
+                print(f"\n {c_yellow('Hint:')} Termux requires Android system liblzma.so for shaderc.")
+            elif "libc++_shared.so" in err_msg:
+                print(f"\n {c_yellow('Hint:')} Run: {c_cyan('pkg install libc++')}")
+            return False
+    except Exception as e:
+        print(f"\n {c_red('✗ Failed to invoke compiler:')} {e}")
+        return False
+
     out_dir = os.path.join(BUILD_DIR, target_platform)
     os.makedirs(out_dir, exist_ok=True)
 
     all_materials = get_available_materials()
-    mat_patterns = []
+    import lazurite.project.project as lp
+
     if material_name and material_name.lower() not in ("all", "*"):
         matched = None
         for m in all_materials:
@@ -290,33 +339,66 @@ def build_materials(target_platform="windows", material_name=None):
             print(f" {c_red('Error:')} Material '{material_name}' not found.")
             print(f" Available: {', '.join(all_materials)}")
             return False
-        mat_patterns = [os.path.join(MATERIALS_DIR, matched)]
         print(f" {c_bold('Building')} {c_cyan(matched)} for {c_yellow(target_platform)}...")
-    else:
-        print(f" {c_bold('Building all')} {c_cyan(str(len(all_materials)))} materials for {c_yellow(target_platform)}...")
+        try:
+            lp.compile(
+                project_path=MATERIALS_DIR,
+                profiles=[target_platform],
+                output_folder=out_dir,
+                material_patterns=[os.path.join(MATERIALS_DIR, matched)],
+                shaderc_path=shaderc_path,
+                defines=[],
+            )
+            elapsed = time.time() - t0
+            rel_out = os.path.relpath(out_dir, ROOT_DIR)
+            print(f"\n {c_green('✓ Done')} in {elapsed:.1f}s -> {c_bold(rel_out)}")
+            return True
+        except Exception as e:
+            print(f"\n {c_red('✗ Build failed:')} {e}")
+            return False
 
-    import lazurite.project.project as lp
+    print(f" {c_bold('Building all')} {c_cyan(str(len(all_materials)))} materials for {c_yellow(target_platform)}...")
 
-    try:
-        lp.compile(
-            project_path=MATERIALS_DIR,
-            profiles=[target_platform],
-            output_folder=out_dir,
-            material_patterns=mat_patterns,
-            shaderc_path=shaderc_path,
-            defines=[],
-        )
-        elapsed = time.time() - t0
-        rel_out = os.path.relpath(out_dir, ROOT_DIR)
-        print(f"\n {c_green('✓ Done')} in {elapsed:.1f}s -> {c_bold(rel_out)}")
-        return True
-    except Exception as e:
-        err_msg = str(e)
-        print(f"\n {c_red('✗ Build failed:')} {err_msg}")
-        if "libc++_shared.so" in err_msg or "CANNOT LINK EXECUTABLE" in err_msg:
-            print(f"\n {c_yellow('Hint:')} Termux requires libc++_shared.so for shaderc.")
-            print(f" Run: {c_cyan('pkg install libc++')} in Termux.")
+    success_list = []
+    failed_list = []
+
+    for idx, mat in enumerate(all_materials, 1):
+        prefix = f"[{idx}/{len(all_materials)}] {mat}"
+        print(f" {c_bold(prefix)}...", end="", flush=True)
+        m_t0 = time.time()
+        try:
+            lp.compile(
+                project_path=MATERIALS_DIR,
+                profiles=[target_platform],
+                output_folder=out_dir,
+                material_patterns=[os.path.join(MATERIALS_DIR, mat)],
+                shaderc_path=shaderc_path,
+                defines=[],
+            )
+            m_elapsed = time.time() - m_t0
+            print(f"\r {c_green('✓')} {c_bold(prefix)} ({m_elapsed:.1f}s)")
+            success_list.append(mat)
+        except Exception as e:
+            err_lines = [line for line in str(e).strip().splitlines() if line.strip()]
+            err_summary = err_lines[-1] if err_lines else "Unknown error"
+            print(f"\r {c_red('✗')} {c_bold(prefix)}: {c_red(err_summary)}")
+            failed_list.append((mat, err_summary))
+
+    elapsed = time.time() - t0
+    rel_out = os.path.relpath(out_dir, ROOT_DIR)
+
+    print(f"\n{c_bold('=' * 60)}")
+    print(f" Summary ({c_yellow(target_platform)}) in {elapsed:.1f}s -> {c_bold(rel_out)}")
+    print(f"  {c_green('✓ Succeeded:')} {len(success_list)}/{len(all_materials)}")
+    if failed_list:
+        print(f"  {c_red('✗ Failed:')} {len(failed_list)}")
+        for f_name, f_reason in failed_list:
+            print(f"    - {c_bold(f_name)}: {c_dim(f_reason)}")
+        print(c_bold("=" * 60))
         return False
+
+    print(c_bold("=" * 60))
+    return True
 
 
 def clean_build():

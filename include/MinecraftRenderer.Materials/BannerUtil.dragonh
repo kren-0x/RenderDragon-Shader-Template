@@ -11,7 +11,10 @@ vec4 calculateBannerUVs(vec2 uv, vec4 bannerScaleOffset, vec4 baseScaleOffset) {
 vec4 getBannerColor(int frameIndex, vec4 bannerColor, vec4 vertexColor) {
 #if defined(TINTING)
     vec4 color = bannerColor;
-    color.a = frameIndex > 0 ? 0.0 : 1.0;
+    color.w = 1.0;
+    if (frameIndex > 0) {
+        color.w = 0.0;
+    }
     return color;
 #else
     return vertexColor;
@@ -19,8 +22,8 @@ vec4 getBannerColor(int frameIndex, vec4 bannerColor, vec4 vertexColor) {
 }
 
 vec4 applyBannerTint(vec4 baseTex, vec4 patternTex, vec4 color) {
-    baseTex.a = mix(patternTex.r * patternTex.a, patternTex.a, color.a);
-    baseTex.rgb *= color.rgb;
+    baseTex.w = mix(patternTex.x * patternTex.w, patternTex.w, color.w);
+    baseTex.xyz *= color.xyz;
     return baseTex;
 }
 

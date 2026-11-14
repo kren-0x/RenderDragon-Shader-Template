@@ -1,4 +1,8 @@
-int  a_indices   : BLENDINDICES;
+#if BGFX_SHADER_LANGUAGE_HLSL
+int a_indices : BLENDINDICES;
+#else
+float a_indices : BLENDINDICES;
+#endif
 vec4 a_color0    : COLOR0;
 vec4 a_normal    : NORMAL;
 vec3 a_position  : POSITION;
@@ -14,4 +18,5 @@ vec4          v_fog          : COLOR2;
 vec4          v_layerUv      : TEXCOORD1;
 vec4          v_light        : COLOR3;
 centroid vec2 v_texcoord0    : TEXCOORD0;
+centroid vec4 v_texcoords    : TEXCOORD2;
 vec3          v_worldPos     : TEXCOORD3;

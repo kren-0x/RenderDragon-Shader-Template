@@ -25,7 +25,9 @@ void main() {
     World = mul(World, Bones[int(a_indices)]);
 
     vec2 texcoord0 = a_texcoord0;
+#if defined(DEPTH_ONLY_OPAQUE)
     texcoord0 = applyUvAnimation(texcoord0, UVAnimation);
+#endif
 
     vec2 layer1UV = calculateLayerUV(a_texcoord0, UVAnimation.x, UVAnimation.z, UVScale.xy);
     vec2 layer2UV = calculateLayerUV(a_texcoord0, UVAnimation.y, UVAnimation.w, UVScale.xy);
@@ -48,7 +50,7 @@ void main() {
     float fogIntensity = calculateFogIntensity(cameraDepth, FogControl.z, FogControl.x, FogControl.y);
     vec4 fog = vec4(FogColor.rgb, fogIntensity);
 
-#if defined(DEPTH_ONLY) || defined(DEPTH_ONLY_OPAQUE)
+#if defined(DEPTH_ONLY) || defined(DEPTH_ONLY_OPAQUE) || defined(DEPTH_ONLY_ALPHA_TEST)
     v_texcoord0 = vec2_splat(0.0);
     v_color0 = vec4_splat(0.0);
 #else
