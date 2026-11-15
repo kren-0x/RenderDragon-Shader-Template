@@ -12,6 +12,8 @@ import platform
 import zipfile
 import urllib.request
 import json
+import subprocess
+import struct
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MATERIALS_DIR = os.path.join(ROOT_DIR, "materials")
@@ -217,14 +219,74 @@ def setup_materials(version=None, force=False):
                 pass
 
 
+def make_stub_so(arch="aarch64"):
+    is_64 = arch in ("aarch64", "arm64", "x86_64")
+    if is_64:
+        elf_hdr = bytearray(64)
+        elf_hdr[0:8] = b"\x7fELF\x02\x01\x01\x00"
+        struct.pack_into("<HHIQQQIHHHHHH", elf_hdr, 16, 3, 183 if "arm" in arch or "aarch" in arch else 62, 1, 0, 64, 0, 0, 64, 56, 2, 0, 0, 0)
+        ph_load = bytearray(56)
+        struct.pack_into("<IIQQQQQQ", ph_load, 0, 1, 5, 0, 0, 0, 0x200, 0x200, 0x1000)
+        ph_dyn = bytearray(56)
+        struct.pack_into("<IIQQQQQQ", ph_dyn, 0, 2, 6, 0x100, 0x100, 0x100, 112, 112, 8)
+        dyn_sec = bytearray()
+        for tag, val in [(4, 0x170), (5, 0x180), (6, 0x190), (10, 16), (11, 24), (16, 0), (0, 0)]:
+            dyn_sec.extend(struct.pack("<QQ", tag, val))
+        pad = b"\x00" * (0x100 - (64 + 56 * 2))
+        dt_hash = struct.pack("<IIII", 1, 1, 0, 0)
+        dynstr = b"\x00libandroid.so\x00\x00"
+        dynsym = b"\x00" * 24
+        data = elf_hdr + ph_load + ph_dyn + pad + dyn_sec + dt_hash + dynstr + dynsym
+        return bytes(data) + b"\x00" * (512 - len(data))
+    else:
+        elf_hdr = bytearray(52)
+        elf_hdr[0:8] = b"\x7fELF\x01\x01\x01\x00"
+        struct.pack_into("<HHIIIIIHHHHHH", elf_hdr, 16, 3, 40, 1, 0, 52, 0, 0, 52, 32, 2, 0, 0, 0)
+        ph_load = bytearray(32)
+        struct.pack_into("<IIIIIIII", ph_load, 0, 1, 0, 0, 0, 0x200, 0x200, 5, 0x1000)
+        ph_dyn = bytearray(32)
+        struct.pack_into("<IIIIIIII", ph_dyn, 0, 2, 0x80, 0x80, 0x80, 56, 56, 6, 4)
+        dyn_sec = bytearray()
+        for tag, val in [(4, 0xC0), (5, 0xD0), (6, 0xE0), (10, 16), (11, 16), (16, 0), (0, 0)]:
+            dyn_sec.extend(struct.pack("<II", tag, val))
+        pad = b"\x00" * (0x80 - (52 + 32 * 2))
+        dt_hash = struct.pack("<IIII", 1, 1, 0, 0)
+        dynstr = b"\x00libandroid.so\x00\x00"
+        dynsym = b"\x00" * 16
+        data = elf_hdr + ph_load + ph_dyn + pad + dyn_sec + dt_hash + dynstr + dynsym
+        return bytes(data) + b"\x00" * (256 - len(data))
+
+
 def check_and_apply_termux_fix():
     os.makedirs(LIB_DIR, exist_ok=True)
     dest_so = os.path.join(LIB_DIR, "libc++_shared.so")
     dest_lzma = os.path.join(LIB_DIR, "liblzma.so")
+    dest_android = os.path.join(LIB_DIR, "libandroid.so")
 
     termux_prefix = os.environ.get("PREFIX", "/data/data/com.termux/files/usr")
     termux_usr_lib = os.path.join(termux_prefix, "lib")
     local_lib = os.path.expanduser("~/.local/lib")
+
+    if not os.path.exists(dest_android):
+        created = False
+        for comp in ("clang", "gcc"):
+            try:
+                res = subprocess.run([comp, "-shared", "-o", dest_android, "-x", "c", os.devnull], capture_output=True)
+                if res.returncode == 0:
+                    created = True
+                    break
+            except Exception:
+                pass
+        if not created:
+            try:
+                data = make_stub_so(platform.machine().lower())
+                with open(dest_android, "wb") as f:
+                    f.write(data)
+                created = True
+            except Exception:
+                pass
+        if created:
+            print(f" {c_green('Applied')} Termux fix: created stub libandroid.so in {c_bold('tools/lib')}")
 
     if not os.path.exists(dest_so):
         candidates = [
@@ -308,7 +370,6 @@ def build_materials(target_platform="windows", material_name=None):
     check_and_apply_termux_fix()
     shaderc_path = ensure_setup()
 
-    import subprocess
     try:
         test_run = subprocess.run([shaderc_path, "-v"], capture_output=True)
         if test_run.returncode != 0:
