@@ -5,7 +5,9 @@ cd "$SCRIPT_DIR"
 
 LIB_DIR="$SCRIPT_DIR/tools/lib"
 LOCAL_LIB="$HOME/.local/lib"
-TERMUX_SO="/data/data/com.termux/files/usr/lib/libc++_shared.so"
+TERMUX_PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
+TERMUX_SO="$TERMUX_PREFIX/lib/libc++_shared.so"
+TERMUX_BIN="$TERMUX_PREFIX/bin"
 
 mkdir -p "$LIB_DIR"
 
@@ -18,6 +20,15 @@ if [ ! -f "$LIB_DIR/libandroid.so" ]; then
         clang -shared -o "$LIB_DIR/libandroid.so" -x c /dev/null 2>/dev/null || true
     elif which gcc >/dev/null 2>&1; then
         gcc -shared -o "$LIB_DIR/libandroid.so" -x c /dev/null 2>/dev/null || true
+    fi
+fi
+
+if [ -d "/data/data/com.termux" ] || [ -n "$TERMUX_VERSION" ] || [ -n "$PREFIX" ]; then
+    if ! which glslangValidator >/dev/null 2>&1 && ! which glslang >/dev/null 2>&1; then
+        pkg install -y glslang 2>/dev/null || apt-get install -y glslang 2>/dev/null || true
+    fi
+    if [ -f "$TERMUX_BIN/glslangValidator" ] && [ ! -f "$TERMUX_BIN/glslang" ]; then
+        ln -s "$TERMUX_BIN/glslangValidator" "$TERMUX_BIN/glslang" 2>/dev/null || true
     fi
 fi
 

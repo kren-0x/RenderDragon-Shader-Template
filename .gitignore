@@ -4,6 +4,7 @@ bin/
 
 # Shader compiler binaries, downloaded base materials & archives
 tools/shaderc*
+tools/glslang*
 tools/materials/
 tools/lib/
 tools/*.zip

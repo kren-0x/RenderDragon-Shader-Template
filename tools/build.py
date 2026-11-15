@@ -27,6 +27,8 @@ DEV_RELEASE_URL = "https://github.com/devendrn/newb-shader/releases/download/dev
 SERIALIZED_MATERIALS_REPO = "mcpebd/serialized-materials"
 SERIALIZED_MATERIALS_RELEASES_URL = f"https://github.com/{SERIALIZED_MATERIALS_REPO}/releases"
 DEFAULT_SERIALIZED_VERSION = "v26.60"
+GLSLANG_VERSION = "16.6.0"
+GLSLANG_RELEASE_URL = f"https://github.com/KhronosGroup/glslang/releases/download/{GLSLANG_VERSION}/"
 
 if hasattr(sys.stdout, "reconfigure"):
     try:
@@ -346,6 +348,133 @@ def check_and_apply_termux_fix():
                 ld_paths.append(p)
     os.environ["LD_LIBRARY_PATH"] = ":".join(ld_paths)
 
+    termux_bin = os.path.join(termux_prefix, "bin")
+    glsl_val = os.path.join(termux_bin, "glslangValidator")
+    glsl_sym = os.path.join(termux_bin, "glslang")
+    if os.path.exists(glsl_val) and not os.path.exists(glsl_sym):
+        try:
+            os.symlink(glsl_val, glsl_sym)
+        except Exception:
+            pass
+
+
+def is_termux():
+    return bool(
+        os.environ.get("TERMUX_VERSION")
+        or os.path.isdir("/data/data/com.termux")
+        or (os.environ.get("PREFIX") and "termux" in os.environ.get("PREFIX"))
+    )
+
+
+def find_glslang_path():
+    termux_bin = os.path.join(os.environ.get("PREFIX", "/data/data/com.termux/files/usr"), "bin")
+    candidates = [
+        "glslangValidator",
+        "glslang",
+        os.path.join(TOOLS_DIR, "glslangValidator.exe" if os.name == "nt" else "glslangValidator"),
+        os.path.join(TOOLS_DIR, "glslang.exe" if os.name == "nt" else "glslang"),
+        os.path.join(termux_bin, "glslangValidator"),
+        os.path.join(termux_bin, "glslang"),
+        "/data/data/com.termux/files/usr/bin/glslangValidator",
+        "/data/data/com.termux/files/usr/bin/glslang",
+        "/usr/bin/glslangValidator",
+        "/usr/local/bin/glslangValidator",
+        "/usr/bin/glslang",
+        "/usr/local/bin/glslang",
+    ]
+    for c in candidates:
+        if os.path.isabs(c):
+            if os.path.isfile(c) and (os.name == "nt" or os.access(c, os.X_OK)):
+                return c
+        else:
+            w = shutil.which(c)
+            if w:
+                return w
+    return None
+
+
+def ensure_glslang():
+    existing = find_glslang_path()
+    if existing:
+        return existing
+
+    if is_termux():
+        print(f" {c_yellow('Installing')} glslang in Termux...")
+        try:
+            subprocess.run(["pkg", "install", "-y", "glslang"], capture_output=True)
+        except Exception:
+            pass
+        termux_bin = os.path.join(os.environ.get("PREFIX", "/data/data/com.termux/files/usr"), "bin")
+        v = os.path.join(termux_bin, "glslangValidator")
+        s = os.path.join(termux_bin, "glslang")
+        if os.path.exists(v) and not os.path.exists(s):
+            try:
+                os.symlink(v, s)
+            except Exception:
+                pass
+        return find_glslang_path()
+
+    system = platform.system()
+    machine = platform.machine().lower()
+    archive_name = None
+    binary_name = "glslang.exe" if system == "Windows" else "glslang"
+
+    if system == "Windows" and machine in ("amd64", "x86_64", "x86", "arm64"):
+        archive_name = f"glslang-{GLSLANG_VERSION}-windows-x86_64-release.zip"
+    elif system == "Linux" and machine in ("x86_64", "amd64"):
+        archive_name = f"glslang-{GLSLANG_VERSION}-linux-x86_64-release.zip"
+    elif system == "Darwin":
+        archive_name = f"glslang-{GLSLANG_VERSION}-macos-universal-release.zip"
+
+    if not archive_name:
+        return None
+
+    dest_bin = os.path.join(TOOLS_DIR, binary_name)
+    url = GLSLANG_RELEASE_URL + archive_name
+    zip_path = os.path.join(TOOLS_DIR, archive_name)
+
+    print(f" {c_yellow('Downloading')} glslang validator from KhronosGroup...")
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=30) as resp, open(zip_path, "wb") as out_f:
+            shutil.copyfileobj(resp, out_f)
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            for member in zf.infolist():
+                if os.path.basename(member.filename) in ("glslang", "glslang.exe", "glslangValidator", "glslangValidator.exe"):
+                    with zf.open(member) as src, open(dest_bin, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                    os.chmod(dest_bin, 0o755)
+                    print(f" {c_green('Extracted')} glslang validator to {c_bold(dest_bin)}")
+                    return dest_bin
+    except Exception as e:
+        print(f" {c_yellow('Notice:')} Could not download glslang ({e}).")
+    finally:
+        if os.path.exists(zip_path):
+            try:
+                os.remove(zip_path)
+            except Exception:
+                pass
+
+    return find_glslang_path()
+
+
+def format_compile_error(err):
+    err_str = str(err).strip()
+    if not err_str:
+        return "Unknown error"
+    lines = [line.rstrip() for line in err_str.splitlines()]
+    output = []
+    for line in lines:
+        s = line.strip()
+        if not s:
+            if output and output[-1] != "":
+                output.append("")
+            continue
+        if s == "stdin":
+            continue
+        output.append(f"   {line}")
+    return "\n".join(output) if output else "Unknown error"
+
 
 def ensure_setup(version=None, force=False):
     check_and_apply_termux_fix()
@@ -359,16 +488,22 @@ def ensure_setup(version=None, force=False):
         os.chmod(shaderc_path, 0o755)
         print(f" {c_green('Downloaded')} shaderc compiler.")
 
+    ensure_glslang()
+
     if force or not are_base_materials_present():
         setup_materials(version=version, force=force)
 
     return shaderc_path
 
 
-def build_materials(target_platform="windows", material_name=None):
+def build_materials(target_platform="windows", material_name=None, continue_on_error=False):
     t0 = time.time()
     check_and_apply_termux_fix()
     shaderc_path = ensure_setup()
+    glslang_path = ensure_glslang()
+
+    if not glslang_path and target_platform in ("android", "multiplatform"):
+        print(f" {c_yellow('Warning:')} glslangValidator not found. ESSL shader syntax validation is disabled.")
 
     try:
         test_run = subprocess.run([shaderc_path, "-v"], capture_output=True)
@@ -408,6 +543,7 @@ def build_materials(target_platform="windows", material_name=None):
                 output_folder=out_dir,
                 material_patterns=[os.path.join(MATERIALS_DIR, matched)],
                 shaderc_path=shaderc_path,
+                glslang_path=glslang_path,
                 defines=[],
             )
             elapsed = time.time() - t0
@@ -415,7 +551,8 @@ def build_materials(target_platform="windows", material_name=None):
             print(f"\n {c_green('✓ Done')} in {elapsed:.1f}s -> {c_bold(rel_out)}")
             return True
         except Exception as e:
-            print(f"\n {c_red('✗ Build failed:')} {e}")
+            print(f"\n {c_red('✗ Build failed for')} {c_bold(matched)}:")
+            print(c_red(format_compile_error(e)))
             return False
 
     print(f" {c_bold('Building all')} {c_cyan(str(len(all_materials)))} materials for {c_yellow(target_platform)}...")
@@ -434,16 +571,21 @@ def build_materials(target_platform="windows", material_name=None):
                 output_folder=out_dir,
                 material_patterns=[os.path.join(MATERIALS_DIR, mat)],
                 shaderc_path=shaderc_path,
+                glslang_path=glslang_path,
                 defines=[],
             )
             m_elapsed = time.time() - m_t0
             print(f"\r {c_green('✓')} {c_bold(prefix)} ({m_elapsed:.1f}s)")
             success_list.append(mat)
         except Exception as e:
-            err_lines = [line for line in str(e).strip().splitlines() if line.strip()]
-            err_summary = err_lines[-1] if err_lines else "Unknown error"
-            print(f"\r {c_red('✗')} {c_bold(prefix)}: {c_red(err_summary)}")
-            failed_list.append((mat, err_summary))
+            m_elapsed = time.time() - m_t0
+            formatted_err = format_compile_error(e)
+            print(f"\r {c_red('✗')} {c_bold(prefix)} ({m_elapsed:.1f}s)")
+            print(f"\n{c_red(formatted_err)}\n")
+            failed_list.append((mat, formatted_err))
+            if not continue_on_error:
+                print(f" {c_red('Build halted due to compilation error in')} {c_bold(mat)}.")
+                return False
 
     elapsed = time.time() - t0
     rel_out = os.path.relpath(out_dir, ROOT_DIR)
@@ -454,7 +596,9 @@ def build_materials(target_platform="windows", material_name=None):
     if failed_list:
         print(f"  {c_red('✗ Failed:')} {len(failed_list)}")
         for f_name, f_reason in failed_list:
-            print(f"    - {c_bold(f_name)}: {c_dim(f_reason)}")
+            first_err = [ln.strip() for ln in f_reason.splitlines() if ln.strip()]
+            summary_line = first_err[0] if first_err else "Error"
+            print(f"    - {c_bold(f_name)}: {c_dim(summary_line)}")
         print(c_bold("=" * 60))
         return False
 
@@ -617,10 +761,13 @@ def parse_and_run(args):
     all_materials = {m.lower(): m for m in get_available_materials()}
     target_platform = "windows" if os.name == "nt" else "android"
     target_mat = None
+    continue_on_error = False
 
     for arg in args:
         low = arg.lower()
-        if low in ("windows", "win"):
+        if low in ("--continue", "--keep-going", "-k"):
+            continue_on_error = True
+        elif low in ("windows", "win"):
             target_platform = "windows"
         elif low in ("android",):
             target_platform = "android"
@@ -642,9 +789,11 @@ def parse_and_run(args):
             if not matched:
                 print(f" {c_red('Unknown argument:')} '{arg}'")
                 print_help()
-                return
+                sys.exit(1)
 
-    build_materials(target_platform, target_mat)
+    success = build_materials(target_platform, target_mat, continue_on_error=continue_on_error)
+    if not success:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
