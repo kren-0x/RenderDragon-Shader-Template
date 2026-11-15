@@ -13,7 +13,8 @@ A template and build setup for Minecraft Bedrock Edition Render Dragon shaders (
 ├── materials/        # Shader source code (vertex.sc, fragment.sc, varying.def.sc)
 │   └── project.json  # Material pass and compiler config
 └── tools/
-    └── build.py      # Build script
+    ├── build.py      # Build script
+    └── lib/          # Platform runtime shims
 ```
 
 ## Setup and building
@@ -48,9 +49,9 @@ Compiled `.material.bin` files are placed in `build/<platform>/`.
 
 ### Android (Termux)
 
-1. In Termux, install Python and Git, then grant storage access:
+1. In Termux, install packages and grant storage access:
    ```bash
-   pkg update && pkg install python git -y
+   pkg update && pkg install python git glslang clang -y
    termux-setup-storage
    ```
 
@@ -75,7 +76,30 @@ Compiled `.material.bin` files are placed in `build/<platform>/`.
    ./build.sh clean
    ```
 
+On devices with less memory, you can limit parallel workers with `-j 2` if background processes get killed:
+```bash
+./build.sh android -j 2
+```
+
 `shaderc` and base material definitions download automatically on the first build (synced with the latest release from [mcpebd/serialized-materials](https://github.com/mcpebd/serialized-materials)).
+
+## Build options
+
+The build script caches material dependencies and compiled shader outputs in `.build-cache/`. Subsequent runs only recompile materials whose source files or included headers changed.
+
+Available flags:
+- `-j`, `--jobs <N>`: number of parallel build workers (default auto-adjusts based on CPU count and platform)
+- `-f`, `--force`: rebuild all materials, ignoring the cache
+- `-k`, `--continue`: keep building remaining materials even if one fails
+- `clean`: delete `build/` outputs and `.build-cache/`
+
+Examples:
+```bash
+build.bat windows -f
+build.bat android -j 2
+build.bat RenderChunk android
+build.bat clean
+```
 
 ### Adding new materials
 

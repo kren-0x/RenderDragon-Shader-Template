@@ -24,8 +24,9 @@ if [ ! -f "$LIB_DIR/libandroid.so" ]; then
 fi
 
 if [ -d "/data/data/com.termux" ] || [ -n "$TERMUX_VERSION" ] || [ -n "$PREFIX" ]; then
-    if ! which glslangValidator >/dev/null 2>&1 && ! which glslang >/dev/null 2>&1; then
+    if ! which glslangValidator >/dev/null 2>&1 && ! which glslang >/dev/null 2>&1 && [ ! -f "$LIB_DIR/.glslang_installed" ]; then
         pkg install -y glslang 2>/dev/null || apt-get install -y glslang 2>/dev/null || true
+        touch "$LIB_DIR/.glslang_installed" 2>/dev/null || true
     fi
     if [ -f "$TERMUX_BIN/glslangValidator" ] && [ ! -f "$TERMUX_BIN/glslang" ]; then
         ln -s "$TERMUX_BIN/glslangValidator" "$TERMUX_BIN/glslang" 2>/dev/null || true

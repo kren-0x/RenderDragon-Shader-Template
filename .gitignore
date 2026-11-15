@@ -1,6 +1,7 @@
 # Build outputs
 build/
 bin/
+.build-cache/
 
 # Shader compiler binaries, downloaded base materials & archives
 tools/shaderc*

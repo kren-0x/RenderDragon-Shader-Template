@@ -14,14 +14,24 @@ import urllib.request
 import json
 import subprocess
 import struct
+import hashlib
+import pickle
+import re
+import tempfile
+import threading
+import concurrent.futures
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MATERIALS_DIR = os.path.join(ROOT_DIR, "materials")
 INCLUDE_DIR = os.path.join(ROOT_DIR, "include")
 BUILD_DIR = os.path.join(ROOT_DIR, "build")
+CACHE_DIR = os.path.join(ROOT_DIR, ".build-cache")
+SHADERS_CACHE_DIR = os.path.join(CACHE_DIR, "shaders")
 TOOLS_DIR = os.path.join(ROOT_DIR, "tools")
 LIB_DIR = os.path.join(TOOLS_DIR, "lib")
 BASE_MATERIALS_DIR = os.path.join(TOOLS_DIR, "materials")
+
+INCLUDE_RE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*(["<])([^">]+)[">]', re.M)
 
 DEV_RELEASE_URL = "https://github.com/devendrn/newb-shader/releases/download/dev/"
 SERIALIZED_MATERIALS_REPO = "mcpebd/serialized-materials"
@@ -476,6 +486,235 @@ def format_compile_error(err):
     return "\n".join(output) if output else "Unknown error"
 
 
+_FILE_SHA_CACHE = {}
+_FILE_INCLUDES_CACHE = {}
+
+
+def file_sha(path):
+    if not path or not os.path.isfile(path):
+        return ""
+    path = os.path.normpath(os.path.abspath(path))
+    try:
+        mtime = os.path.getmtime(path)
+        cached = _FILE_SHA_CACHE.get(path)
+        if cached and cached[0] == mtime:
+            return cached[1]
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            while chunk := f.read(65536):
+                h.update(chunk)
+        digest = h.hexdigest()
+        _FILE_SHA_CACHE[path] = (mtime, digest)
+        return digest
+    except OSError:
+        return ""
+
+
+def file_includes(path):
+    path = os.path.normpath(os.path.abspath(path))
+    try:
+        mtime = os.path.getmtime(path)
+        cached = _FILE_INCLUDES_CACHE.get(path)
+        if cached and cached[0] == mtime:
+            return cached[1]
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read()
+        incs = [(q == '"', name) for q, name in INCLUDE_RE.findall(content)]
+        _FILE_INCLUDES_CACHE[path] = (mtime, incs)
+        return incs
+    except OSError:
+        return []
+
+
+def get_material_dependencies(mat_name, search_paths):
+    mat_dir = os.path.join(MATERIALS_DIR, mat_name)
+    if not os.path.isdir(mat_dir):
+        return {}, ""
+    own_files = [
+        os.path.join(mat_dir, f)
+        for f in os.listdir(mat_dir)
+        if os.path.isfile(os.path.join(mat_dir, f))
+    ]
+    seen = set()
+    stack = [f for f in own_files if f.endswith((".sc", ".sh", ".dragonh"))]
+
+    while stack:
+        curr = stack.pop()
+        if curr in seen:
+            continue
+        seen.add(curr)
+        for quoted, inc_name in file_includes(curr):
+            candidates = []
+            if quoted:
+                candidates.append(os.path.dirname(curr))
+            candidates.append(mat_dir)
+            candidates.extend(search_paths)
+            for base in candidates:
+                cand = os.path.normpath(os.path.join(base, inc_name))
+                if os.path.isfile(cand) and cand not in seen:
+                    stack.append(cand)
+                    break
+
+    all_deps = set(own_files) | seen
+    base_json = os.path.join(BASE_MATERIALS_DIR, f"{mat_name}.material.json")
+    if os.path.isfile(base_json):
+        all_deps.add(base_json)
+
+    hashes = {
+        os.path.relpath(p, ROOT_DIR).replace("\\", "/"): file_sha(p)
+        for p in sorted(all_deps)
+    }
+    fingerprint = hashlib.sha256(json.dumps(hashes, sort_keys=True).encode()).hexdigest()
+    return hashes, fingerprint
+
+
+def get_global_build_state(shaderc_path, glslang_path):
+    return {
+        "shaderc": file_sha(shaderc_path) if shaderc_path and os.path.isfile(shaderc_path) else "",
+        "glslang": file_sha(glslang_path) if glslang_path and os.path.isfile(glslang_path) else "",
+        "project.json": file_sha(os.path.join(MATERIALS_DIR, "project.json")),
+    }
+
+
+def load_platform_cache(platform):
+    cache_file = os.path.join(CACHE_DIR, f"{platform}.json")
+    try:
+        if os.path.isfile(cache_file):
+            with open(cache_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                data.setdefault("materials", {})
+                data.setdefault("global", {})
+                return data
+    except Exception:
+        pass
+    return {"global": {}, "materials": {}}
+
+
+def save_platform_cache(platform, cache):
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    target = os.path.join(CACHE_DIR, f"{platform}.json")
+    tmp = target + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(cache, f, sort_keys=True, separators=(",", ":"))
+        os.replace(tmp, target)
+    except Exception:
+        pass
+
+
+_SHADERC_HOOK_INSTALLED = False
+_ORIG_SHADERC_COMPILE = None
+_CURRENT_SHADER_CACHE_DIR = None
+_CURRENT_SHADERC_SHA = None
+_FILE_SIG_CACHE = {}
+
+
+def get_file_closure_sig(file_path, search_paths):
+    file_path = os.path.normpath(os.path.abspath(file_path))
+    mtime = os.path.getmtime(file_path) if os.path.exists(file_path) else 0
+    cached = _FILE_SIG_CACHE.get(file_path)
+    if cached and cached[0] == mtime:
+        return cached[1]
+
+    seen = set()
+    stack = [file_path]
+    while stack:
+        curr = stack.pop()
+        if curr in seen:
+            continue
+        seen.add(curr)
+        try:
+            with open(curr, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+        except OSError:
+            continue
+        for quoted, inc_name in INCLUDE_RE.findall(content):
+            candidates = []
+            if quoted == '"':
+                candidates.append(os.path.dirname(curr))
+            candidates.extend(search_paths)
+            for base in candidates:
+                cand = os.path.normpath(os.path.join(base, inc_name))
+                if os.path.isfile(cand) and cand not in seen:
+                    stack.append(cand)
+                    break
+
+    sig = [f"{os.path.basename(p)}:{file_sha(p)}" for p in sorted(seen)]
+    _FILE_SIG_CACHE[file_path] = (mtime, sig)
+    return sig
+
+
+def _cached_shaderc_compile(self, file, platform=None, stage=None, varying_def=None, include=None, defines=None, options=None):
+    cache_dir = _CURRENT_SHADER_CACHE_DIR
+    if not cache_dir:
+        return _ORIG_SHADERC_COMPILE(self, file, platform, stage, varying_def, include, defines, options)
+
+    varying_sha = ""
+    if varying_def and os.path.isfile(varying_def):
+        try:
+            with open(varying_def, "rb") as vf:
+                varying_sha = hashlib.sha256(vf.read()).hexdigest()
+        except OSError:
+            pass
+
+    search_paths = list(include or [])
+    search_paths.append(INCLUDE_DIR)
+    if file:
+        search_paths.append(os.path.dirname(os.path.abspath(file)))
+
+    file_sig = get_file_closure_sig(file, search_paths) if file else []
+    defines_list = sorted(d.format_bgfx() for d in (defines or []))
+    options_list = sorted(options or [])
+
+    key_data = [
+        _CURRENT_SHADERC_SHA,
+        platform.name if platform else "",
+        stage.name if stage else "",
+        file_sig,
+        varying_sha,
+        defines_list,
+        options_list,
+    ]
+    key = hashlib.sha256(json.dumps(key_data).encode()).hexdigest()
+
+    target_dir = os.path.join(cache_dir, key[:2])
+    target_path = os.path.join(target_dir, f"{key}.bin")
+
+    if os.path.isfile(target_path):
+        try:
+            with open(target_path, "rb") as f:
+                return pickle.loads(f.read())
+        except Exception:
+            pass
+
+    result = _ORIG_SHADERC_COMPILE(self, file, platform, stage, varying_def, include, defines, options)
+
+    try:
+        os.makedirs(target_dir, exist_ok=True)
+        data = pickle.dumps(result)
+        fd, tmp = tempfile.mkstemp(dir=target_dir, suffix=".tmp")
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.replace(tmp, target_path)
+    except Exception:
+        pass
+
+    return result
+
+
+def install_shaderc_cache_hook(platform_slug, shaderc_path):
+    global _SHADERC_HOOK_INSTALLED, _ORIG_SHADERC_COMPILE, _CURRENT_SHADER_CACHE_DIR, _CURRENT_SHADERC_SHA
+    _CURRENT_SHADER_CACHE_DIR = os.path.join(SHADERS_CACHE_DIR, platform_slug)
+    _CURRENT_SHADERC_SHA = file_sha(shaderc_path) if shaderc_path and os.path.isfile(shaderc_path) else ""
+    if _SHADERC_HOOK_INSTALLED:
+        return
+    import lazurite.compiler.shaderc as lz_shaderc
+    _ORIG_SHADERC_COMPILE = lz_shaderc.ShadercCompiler.compile
+    lz_shaderc.ShadercCompiler.compile = _cached_shaderc_compile
+    _SHADERC_HOOK_INSTALLED = True
+
+
 def ensure_setup(version=None, force=False):
     check_and_apply_termux_fix()
     shaderc_path, shaderc_url = get_shaderc_path()
@@ -496,11 +735,13 @@ def ensure_setup(version=None, force=False):
     return shaderc_path
 
 
-def build_materials(target_platform="windows", material_name=None, continue_on_error=False):
+def build_materials(target_platform="windows", material_name=None, continue_on_error=False, force=False, jobs=None):
     t0 = time.time()
     check_and_apply_termux_fix()
     shaderc_path = ensure_setup()
     glslang_path = ensure_glslang()
+
+    install_shaderc_cache_hook(target_platform, shaderc_path)
 
     if not glslang_path and target_platform in ("android", "multiplatform"):
         print(f" {c_yellow('Warning:')} glslangValidator not found. ESSL shader syntax validation is disabled.")
@@ -522,8 +763,22 @@ def build_materials(target_platform="windows", material_name=None, continue_on_e
     out_dir = os.path.join(BUILD_DIR, target_platform)
     os.makedirs(out_dir, exist_ok=True)
 
+    cache = load_platform_cache(target_platform)
+    glob_state = get_global_build_state(shaderc_path, glslang_path)
+    if cache.get("global") != glob_state:
+        cache["materials"] = {}
+        cache["global"] = glob_state
+
     all_materials = get_available_materials()
     import lazurite.project.project as lp
+
+    cpu_count = os.cpu_count() or 2
+    if jobs is not None and jobs > 0:
+        max_material_workers = jobs
+    elif is_termux():
+        max_material_workers = min(3, max(1, cpu_count // 2))
+    else:
+        max_material_workers = min(6, max(2, cpu_count // 2))
 
     if material_name and material_name.lower() not in ("all", "*"):
         matched = None
@@ -535,6 +790,15 @@ def build_materials(target_platform="windows", material_name=None, continue_on_e
             print(f" {c_red('Error:')} Material '{material_name}' not found.")
             print(f" Available: {', '.join(all_materials)}")
             return False
+
+        out_file = os.path.join(out_dir, f"{matched}.material.bin")
+        deps_hashes, fp = get_material_dependencies(matched, [INCLUDE_DIR])
+        rel_out = os.path.relpath(out_dir, ROOT_DIR)
+
+        if not force and os.path.isfile(out_file) and cache.get("materials", {}).get(matched, {}).get("fp") == fp:
+            print(f" {c_green('✓ Up to date')} {c_bold(matched)} {c_dim('(cached)')} -> {c_bold(rel_out)}")
+            return True
+
         print(f" {c_bold('Building')} {c_cyan(matched)} for {c_yellow(target_platform)}...")
         try:
             lp.compile(
@@ -547,7 +811,12 @@ def build_materials(target_platform="windows", material_name=None, continue_on_e
                 defines=[],
             )
             elapsed = time.time() - t0
-            rel_out = os.path.relpath(out_dir, ROOT_DIR)
+            cache.setdefault("materials", {})[matched] = {
+                "fp": fp,
+                "files": deps_hashes,
+                "time": round(elapsed, 2),
+            }
+            save_platform_cache(target_platform, cache)
             print(f"\n {c_green('✓ Done')} in {elapsed:.1f}s -> {c_bold(rel_out)}")
             return True
         except Exception as e:
@@ -555,14 +824,45 @@ def build_materials(target_platform="windows", material_name=None, continue_on_e
             print(c_red(format_compile_error(e)))
             return False
 
-    print(f" {c_bold('Building all')} {c_cyan(str(len(all_materials)))} materials for {c_yellow(target_platform)}...")
+    cached_list = []
+    todo_list = []
 
-    success_list = []
+    for mat in all_materials:
+        out_file = os.path.join(out_dir, f"{mat}.material.bin")
+        deps_hashes, fp = get_material_dependencies(mat, [INCLUDE_DIR])
+        if not force and os.path.isfile(out_file) and cache.get("materials", {}).get(mat, {}).get("fp") == fp:
+            cached_list.append(mat)
+        else:
+            todo_list.append((mat, deps_hashes, fp))
+
+    rel_out = os.path.relpath(out_dir, ROOT_DIR)
+    total_count = len(all_materials)
+
+    if not todo_list:
+        elapsed = time.time() - t0
+        print(f" {c_green('✓ All')} {c_cyan(str(total_count))} materials are {c_green('up to date')} {c_dim('(cached)')} in {elapsed:.2f}s -> {c_bold(rel_out)}")
+        return True
+
+    todo_list.sort(
+        key=lambda item: -cache.get("materials", {}).get(item[0], {}).get("time", 999.0)
+    )
+
+    workers = min(max_material_workers, len(todo_list))
+    w_info = f", {workers} workers" if workers > 1 else ""
+    c_info = f" ({len(cached_list)} cached{w_info})" if cached_list else f" ({workers} workers)"
+    print(f" {c_bold('Building')} {c_cyan(str(len(todo_list)))} materials for {c_yellow(target_platform)}{c_info}...")
+
+    completed_count = len(cached_list)
+    success_list = list(cached_list)
     failed_list = []
+    print_lock = threading.Lock()
+    cache_lock = threading.Lock()
+    stop_event = threading.Event()
 
-    for idx, mat in enumerate(all_materials, 1):
-        prefix = f"[{idx}/{len(all_materials)}] {mat}"
-        print(f" {c_bold(prefix)}...", end="", flush=True)
+    def compile_job(item):
+        mat, deps_hashes, fp = item
+        if stop_event.is_set():
+            return (mat, False, 0.0, deps_hashes, fp, "Cancelled")
         m_t0 = time.time()
         try:
             lp.compile(
@@ -575,24 +875,44 @@ def build_materials(target_platform="windows", material_name=None, continue_on_e
                 defines=[],
             )
             m_elapsed = time.time() - m_t0
-            print(f"\r {c_green('✓')} {c_bold(prefix)} ({m_elapsed:.1f}s)")
-            success_list.append(mat)
+            return (mat, True, m_elapsed, deps_hashes, fp, None)
         except Exception as e:
             m_elapsed = time.time() - m_t0
-            formatted_err = format_compile_error(e)
-            print(f"\r {c_red('✗')} {c_bold(prefix)} ({m_elapsed:.1f}s)")
-            print(f"\n{c_red(formatted_err)}\n")
-            failed_list.append((mat, formatted_err))
-            if not continue_on_error:
-                print(f" {c_red('Build halted due to compilation error in')} {c_bold(mat)}.")
-                return False
+            return (mat, False, m_elapsed, deps_hashes, fp, e)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+        future_map = {executor.submit(compile_job, item): item for item in todo_list}
+        for future in concurrent.futures.as_completed(future_map):
+            mat, ok, m_elapsed, deps_hashes, fp, err = future.result()
+            with print_lock:
+                completed_count += 1
+                prefix = f"[{completed_count:2d}/{total_count}] {mat}"
+                if ok:
+                    print(f" {c_green('✓')} {c_bold(prefix)} ({m_elapsed:.1f}s)")
+                    with cache_lock:
+                        cache.setdefault("materials", {})[mat] = {
+                            "fp": fp,
+                            "files": deps_hashes,
+                            "time": round(m_elapsed, 2),
+                        }
+                        save_platform_cache(target_platform, cache)
+                    success_list.append(mat)
+                elif not stop_event.is_set():
+                    formatted_err = format_compile_error(err)
+                    print(f" {c_red('✗')} {c_bold(prefix)} ({m_elapsed:.1f}s)")
+                    print(f"\n{c_red(formatted_err)}\n")
+                    failed_list.append((mat, formatted_err))
+                    if not continue_on_error:
+                        stop_event.set()
+                        for f in future_map:
+                            f.cancel()
 
     elapsed = time.time() - t0
-    rel_out = os.path.relpath(out_dir, ROOT_DIR)
 
     print(f"\n{c_bold('=' * 60)}")
     print(f" Summary ({c_yellow(target_platform)}) in {elapsed:.1f}s -> {c_bold(rel_out)}")
-    print(f"  {c_green('✓ Succeeded:')} {len(success_list)}/{len(all_materials)}")
+    cache_msg = f" ({len(cached_list)} cached, {len(todo_list) - len(failed_list)} built)" if cached_list else ""
+    print(f"  {c_green('✓ Succeeded:')} {len(success_list)}/{total_count}{cache_msg}")
     if failed_list:
         print(f"  {c_red('✗ Failed:')} {len(failed_list)}")
         for f_name, f_reason in failed_list:
@@ -607,11 +927,17 @@ def build_materials(target_platform="windows", material_name=None, continue_on_e
 
 
 def clean_build():
+    cleaned = False
     if os.path.exists(BUILD_DIR):
         shutil.rmtree(BUILD_DIR)
         print(f" {c_green('Cleaned')} build/ directory.")
-    else:
-        print(f" {c_dim('Build directory is already clean.')}")
+        cleaned = True
+    if os.path.exists(CACHE_DIR):
+        shutil.rmtree(CACHE_DIR)
+        print(f" {c_green('Cleaned')} .build-cache/ directory.")
+        cleaned = True
+    if not cleaned:
+        print(f" {c_dim('Build directory and cache are already clean.')}")
 
 
 def print_help():
@@ -625,7 +951,12 @@ def print_help():
   build.bat [material]           Build single material for {default_plat}
   build.bat [material] [plat]    Build single material for target platform
   build.bat setup [version]      Download base materials (default: latest release)
-  build.bat clean                Delete build/ artifacts
+  build.bat clean                Delete build/ artifacts and cache
+
+{c_bold("Flags:")}
+  --force, -f                    Force full rebuild (ignore cache)
+  --jobs, -j <N>                 Number of parallel workers (default: auto)
+  --continue, -k                 Continue building remaining materials on error
 
 {c_bold("Platforms:")}
   windows, android, ios, multiplatform
@@ -636,8 +967,8 @@ def print_help():
   build.bat android
   build.bat RenderChunk
   build.bat RenderChunk android
+  build.bat android --force -j 4
   build.bat setup
-  build.bat setup v26.50
   build.bat clean
 """)
 
@@ -671,7 +1002,7 @@ def run_interactive():
 
         print()
         print(f"  {c_bold('Options:')}")
-        print(f"    {c_cyan('c')} clean build/   {c_cyan('s')} setup/check   {c_cyan('q')} quit")
+        print(f"    {c_cyan('c')} clean build/   {c_cyan('s')} setup/check   {c_cyan('f')} force rebuild   {c_cyan('q')} quit")
         print()
 
         try:
@@ -684,6 +1015,10 @@ def run_interactive():
             break
         if choice in ("c", "clean"):
             clean_build()
+            continue
+        if choice in ("f", "force"):
+            print()
+            build_materials(default_plat, None, force=True)
             continue
         if choice in ("s", "setup"):
             current = get_current_installed_version() or "none"
@@ -762,11 +1097,23 @@ def parse_and_run(args):
     target_platform = "windows" if os.name == "nt" else "android"
     target_mat = None
     continue_on_error = False
+    force = False
+    jobs = None
 
-    for arg in args:
+    idx = 0
+    while idx < len(args):
+        arg = args[idx]
         low = arg.lower()
         if low in ("--continue", "--keep-going", "-k"):
             continue_on_error = True
+        elif low in ("--force", "-f"):
+            force = True
+        elif low in ("--jobs", "-j"):
+            if idx + 1 < len(args) and args[idx + 1].isdigit():
+                idx += 1
+                jobs = int(args[idx])
+        elif low.startswith("-j") and len(low) > 2 and low[2:].isdigit():
+            jobs = int(low[2:])
         elif low in ("windows", "win"):
             target_platform = "windows"
         elif low in ("android",):
@@ -790,8 +1137,15 @@ def parse_and_run(args):
                 print(f" {c_red('Unknown argument:')} '{arg}'")
                 print_help()
                 sys.exit(1)
+        idx += 1
 
-    success = build_materials(target_platform, target_mat, continue_on_error=continue_on_error)
+    success = build_materials(
+        target_platform,
+        target_mat,
+        continue_on_error=continue_on_error,
+        force=force,
+        jobs=jobs,
+    )
     if not success:
         sys.exit(1)
 
